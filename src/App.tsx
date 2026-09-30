@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, UserCircle, CheckCircle2, AlertTriangle, Check, FileText, Loader2, ArrowLeft, Table, Printer } from 'lucide-react';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
@@ -25,7 +25,6 @@ interface Record {
   id: string;
   fields: ExtractedField[];
   date: string;
-  // Summary for table
   khasraNo: string;
   khasraNo_hi: string;
   khatauniNo: string;
@@ -36,14 +35,36 @@ interface Record {
   area_hi: string;
   village: string;
   village_hi: string;
+  imageUrl?: string | null;
+  fileType?: string | null;
 }
 
+const dataURLtoBlobUrl = (dataUrl: string) => {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl;
+  try {
+    const arr = dataUrl.split(',');
+    const mimeMatch = arr[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : '';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    const blob = new Blob([u8arr], { type: mime });
+    return URL.createObjectURL(blob);
+  } catch (e) {
+    console.error("Failed to convert data URL to Blob URL", e);
+    return dataUrl;
+  }
+};
+
 const initialFields: ExtractedField[] = [
-  { id: 'f1', labelEn: 'Plot / Khasra No.', labelHi: 'खसरा संख्या', value: '128/4A', value_hi: '128/4A', confidence: 98, status: 'Verified' },
-  { id: 'f2', labelEn: 'Register / Khatauni No.', labelHi: 'खतौनी संख्या', value: '45-B', value_hi: '45-B', confidence: 95, status: 'Verified' },
-  { id: 'f3', labelEn: 'Landholder Name', labelHi: 'खातेदार का नाम', value: 'Ramesh Kumar', value_hi: 'रमेश कुमार', confidence: 90, status: 'Verified' },
-  { id: 'f4', labelEn: 'Land Area / Extent', labelHi: 'क्षेत्रफल', value: '2.5 Acres', value_hi: '2.5 एकड़', confidence: 62, status: 'Review Needed' },
-  { id: 'f5', labelEn: 'Village / Revenue Circle', labelHi: 'मौजा / ग्राम', value: 'Rampur Mauza', value_hi: 'रामपुर मौजा', confidence: 92, status: 'Verified' },
+  { id: 'f1', labelEn: 'Plot / Khasra No.', labelHi: 'खसरा संख्या', value: '', value_hi: '', confidence: 0, status: 'Review Needed' },
+  { id: 'f2', labelEn: 'Register / Khatauni No.', labelHi: 'खतौनी संख्या', value: '', value_hi: '', confidence: 0, status: 'Review Needed' },
+  { id: 'f3', labelEn: 'Landholder Name', labelHi: 'खातेदार का नाम', value: '', value_hi: '', confidence: 0, status: 'Review Needed' },
+  { id: 'f4', labelEn: 'Land Area / Extent', labelHi: 'क्षेत्रफल', value: '', value_hi: '', confidence: 0, status: 'Review Needed' },
+  { id: 'f5', labelEn: 'Village / Revenue Circle', labelHi: 'मौजा / ग्राम', value: '', value_hi: '', confidence: 0, status: 'Review Needed' },
 ];
 
 const mockFieldsRecord1: ExtractedField[] = [
@@ -63,15 +84,15 @@ const mockFieldsRecord2: ExtractedField[] = [
 ];
 
 const initialRecords: Record[] = [
-  { 
+  {
     id: '1', fields: mockFieldsRecord1, date: '2023-10-12',
-    khasraNo: '102/2', khasraNo_hi: '102/2', khatauniNo: '14-A', khatauniNo_hi: '14-A', 
-    name: 'Sita Ram', name_hi: 'सीता राम', area: '1.2 Acres', area_hi: '1.2 एकड़', village: 'Rampur Mauza', village_hi: 'रामपुर मौजा' 
+    khasraNo: '102/2', khasraNo_hi: '102/2', khatauniNo: '14-A', khatauniNo_hi: '14-A',
+    name: 'Sita Ram', name_hi: 'सीता राम', area: '1.2 Acres', area_hi: '1.2 एकड़', village: 'Rampur Mauza', village_hi: 'रामपुर मौजा'
   },
-  { 
+  {
     id: '2', fields: mockFieldsRecord2, date: '2023-10-14',
-    khasraNo: '45', khasraNo_hi: '45', khatauniNo: '89-C', khatauniNo_hi: '89-C', 
-    name: 'Mohan Singh', name_hi: 'मोहन सिंह', area: '3.5 Hectares', area_hi: '3.5 हेक्टेयर', village: 'Kishanpur', village_hi: 'किशनपुर' 
+    khasraNo: '45', khasraNo_hi: '45', khatauniNo: '89-C', khatauniNo_hi: '89-C',
+    name: 'Mohan Singh', name_hi: 'मोहन सिंह', area: '3.5 Hectares', area_hi: '3.5 हेक्टेयर', village: 'Kishanpur', village_hi: 'किशनपुर'
   },
 ];
 
@@ -95,6 +116,7 @@ const UI_TEXT = {
     status: 'Status',
     confirm: 'Confirm',
     submitApproval: 'Submit Final Approval',
+    saveRecord: 'Save Updated Record',
     clearToSubmit: 'Clear Pending Reviews to Submit',
     thRecordId: 'Record ID',
     thKhasra: 'Plot / Khasra No.',
@@ -123,6 +145,7 @@ const UI_TEXT = {
     status: 'स्थिति',
     confirm: 'पुष्टि करें',
     submitApproval: 'अंतिम स्वीकृति जमा करें',
+    saveRecord: 'अपडेटेड रिकॉर्ड सेव करें',
     clearToSubmit: 'जमा करने के लिए लंबित समीक्षा साफ़ करें',
     thRecordId: 'रिकॉर्ड आईडी',
     thKhasra: 'खसरा संख्या',
@@ -135,18 +158,42 @@ const UI_TEXT = {
 };
 
 function App() {
+  const [records, setRecords] = useState<Record[]>(() => {
+    const saved = localStorage.getItem('nlrdp_records');
+    if (saved) return JSON.parse(saved);
+    return initialRecords;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('nlrdp_records', JSON.stringify(records));
+    } catch (err) {
+      console.warn("Storage quota exceeded. Saving lightweight records without images...");
+      try {
+        const lightweightRecords = records.map(r => ({ ...r, imageUrl: null }));
+        localStorage.setItem('nlrdp_records', JSON.stringify(lightweightRecords));
+      } catch (fallbackErr) {
+        console.error("Failed to save records to localStorage", fallbackErr);
+      }
+    }
+  }, [records]);
+
   const [fields, setFields] = useState<ExtractedField[]>(initialFields);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState<string>('');
-  
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // uploadedImagePreview is an Object URL used for rendering (supports PDF page fragments)
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
+  // uploadedImageDataUrl is the base64 string used for saving to localStorage
+  const [uploadedImageDataUrl, setUploadedImageDataUrl] = useState<string | null>(null);
+
   const [uploadedFileType, setUploadedFileType] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [showFinalTable, setShowFinalTable] = useState(false);
-  const [records, setRecords] = useState<Record[]>(initialRecords);
-  
+  const [showFinalTable, setShowFinalTable] = useState(true);
   const [displayLang, setDisplayLang] = useState<DisplayLang>('en');
 
   const selectedField = fields.find(f => f.id === selectedFieldId);
@@ -159,9 +206,18 @@ function App() {
 
   const handleRecordRowClick = (record: Record) => {
     setFields(record.fields);
+    setUploadedImageDataUrl(record.imageUrl || null);
+
+    if (record.imageUrl) {
+      // Convert base64 back to Blob URL for iframe compatibility
+      setUploadedImagePreview(dataURLtoBlobUrl(record.imageUrl));
+    } else {
+      setUploadedImagePreview(null);
+    }
+
+    setUploadedFileType(record.fileType || null);
+    setEditingRecordId(record.id);
     setShowFinalTable(false);
-    // Note: We don't have the original image blob here for mock data, so the viewer might show fallback.
-    // In a real app, record would include the URL of the processed document.
   };
 
   const handleExportPDF = () => {
@@ -185,34 +241,34 @@ function App() {
     }
   };
 
-  const fileToGenerativePart = async (file: File) => {
-    const base64EncodedDataPromise = new Promise<string>((resolve) => {
+  const readFileAsDataURL = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+      reader.onload = () => resolve(reader.result as string);
       reader.readAsDataURL(file);
     });
-    return {
-      inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
-    };
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-  
-    const previewUrl = URL.createObjectURL(file);
-    setUploadedImagePreview(previewUrl);
-    setUploadedFileType(file.type);
+
     setIsProcessing(true);
     setSelectedFieldId(null);
+    setEditingRecordId(null); // It's a new upload, so not editing an old record
     setShowFinalTable(false);
-  
+
     try {
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-3.8-flash",
-        generationConfig: { responseMimeType: "application/json" }
-      });
-      
+      const dataUrl = await readFileAsDataURL(file);
+      const objectUrl = URL.createObjectURL(file);
+
+      setUploadedImagePreview(objectUrl);
+      setUploadedImageDataUrl(dataUrl);
+      setUploadedFileType(file.type);
+
+      const base64Part = dataUrl.split(',')[1];
+      const imagePart = { inlineData: { data: base64Part, mimeType: file.type } };
+
       const prompt = `Extract the following fields from the land record document: 
   khasra_number, khatauni_number, owner_name, area_extent, village_mauza.
   For each field, return an object containing { value: string, value_hi: string, confidence: number (0-100), box_2d: [ymin, xmin, ymax, xmax], page_number: number }.
@@ -228,29 +284,63 @@ function App() {
     "area_extent": { "value": "", "value_hi": "", "confidence": 0, "box_2d": [0,0,0,0], "page_number": 1 },
     "village_mauza": { "value": "", "value_hi": "", "confidence": 0, "box_2d": [0,0,0,0], "page_number": 1 }
   }`;
-  
-      const imagePart = await fileToGenerativePart(file);
-      
+
+      const fallbackModels = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview"];
       let data: any = null;
-      let retries = 3;
-      
-      while (retries > 0) {
+      let modelErrors: string[] = [];
+
+      for (const modelName of fallbackModels) {
+        console.log(`Attempting extraction with model: ${modelName}`);
         try {
-          const result = await model.generateContent([prompt, imagePart]);
-          const response = await result.response;
-          const text = response.text();
-          const cleanText = text.replace(/```(?:json)?/gi, '').trim();
-          data = JSON.parse(cleanText);
-          break;
-        } catch (err: any) {
-          retries--;
-          if (retries === 0 || !(err.message && err.message.includes('503'))) {
-            throw err;
+          const generationConfig: any = {};
+          if (!modelName.includes('vision')) {
+            generationConfig.responseMimeType = "application/json";
           }
-          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            generationConfig
+          });
+
+          let retries = 3;
+          let success = false;
+
+          while (retries > 0) {
+            try {
+              const result = await model.generateContent([prompt, imagePart]);
+              const response = await result.response;
+              const text = response.text();
+              const cleanText = text.replace(/```(?:json)?/gi, '').trim();
+              data = JSON.parse(cleanText);
+              success = true;
+              break;
+            } catch (err: any) {
+              if (err.message && err.message.includes('503')) {
+                retries--;
+                console.warn(`API 503 on ${modelName}. Retrying in 3 seconds... (${retries} left)`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                if (retries === 0) modelErrors.push(`${modelName}: 503 Overloaded`);
+              } else {
+                console.warn(`Model ${modelName} failed: ${err.message}`);
+                modelErrors.push(`${modelName}: ${err.message}`);
+                break;
+              }
+            }
+          }
+
+          if (success) {
+            console.log(`Successfully extracted data using ${modelName}`);
+            break;
+          }
+        } catch (err: any) {
+          modelErrors.push(`${modelName}: ${err.message}`);
         }
       }
-  
+
+      if (!data) {
+        throw new Error(`All model fallbacks failed:\n${modelErrors.join('\n')}`);
+      }
+
       const updatedFields: ExtractedField[] = [
         { id: 'f1', labelEn: 'Plot / Khasra No.', labelHi: 'खसरा संख्या', value: data.khasra_number?.value || 'N/A', value_hi: data.khasra_number?.value_hi || 'N/A', confidence: data.khasra_number?.confidence || 0, status: data.khasra_number?.confidence < 80 ? 'Review Needed' : 'Verified', box2d: data.khasra_number?.box_2d, page_number: data.khasra_number?.page_number },
         { id: 'f2', labelEn: 'Register / Khatauni No.', labelHi: 'खतौनी संख्या', value: data.khatauni_number?.value || 'N/A', value_hi: data.khatauni_number?.value_hi || 'N/A', confidence: data.khatauni_number?.confidence || 0, status: data.khatauni_number?.confidence < 80 ? 'Review Needed' : 'Verified', box2d: data.khatauni_number?.box_2d, page_number: data.khatauni_number?.page_number },
@@ -261,7 +351,7 @@ function App() {
       setFields(updatedFields);
     } catch (err: any) {
       console.error("Extraction error:", err);
-      alert(`Failed to extract data: ${err.message || 'Unknown error'}`);
+      alert(`Extraction Failed: ${err.message}`);
     } finally {
       setIsProcessing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -269,8 +359,7 @@ function App() {
   };
 
   const handleSubmitApproval = () => {
-    const newRecord: Record = {
-      id: Date.now().toString(),
+    const updatedRecordData = {
       fields: fields,
       khasraNo: fields.find(f => f.id === 'f1')?.value || '',
       khasraNo_hi: fields.find(f => f.id === 'f1')?.value_hi || '',
@@ -282,10 +371,25 @@ function App() {
       area_hi: fields.find(f => f.id === 'f4')?.value_hi || '',
       village: fields.find(f => f.id === 'f5')?.value || '',
       village_hi: fields.find(f => f.id === 'f5')?.value_hi || '',
-      date: new Date().toISOString().split('T')[0]
+      date: new Date().toISOString().split('T')[0],
+      imageUrl: uploadedImageDataUrl,
+      fileType: uploadedFileType
     };
-    setRecords([...records, newRecord]);
+
+    if (editingRecordId) {
+      // Update existing record
+      setRecords(records.map(r => r.id === editingRecordId ? { ...r, ...updatedRecordData } : r));
+    } else {
+      // Create new record
+      const newRecord: Record = {
+        id: Math.floor(100000 + Math.random() * 900000).toString(), // E.g. #843832
+        ...updatedRecordData
+      };
+      setRecords([...records, newRecord]);
+    }
+
     setShowFinalTable(true);
+    setEditingRecordId(null);
   };
 
   const renderBox = (box?: [number, number, number, number]) => {
@@ -295,9 +399,9 @@ function App() {
     const left = (xmin / 1000) * 100;
     const height = ((ymax - ymin) / 1000) * 100;
     const width = ((xmax - xmin) / 1000) * 100;
-  
+
     return (
-      <div 
+      <div
         className="absolute border-2 border-red-500 bg-red-500/20 animate-pulse pointer-events-none"
         style={{
           top: `${top}%`,
@@ -314,7 +418,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans overflow-hidden">
-      
+
       {/* Hide elements on print */}
       <style>{`
         @media print {
@@ -340,8 +444,8 @@ function App() {
           <h1 className="text-xl font-bold text-slate-800 tracking-tight">National Land Record Digitization Portal</h1>
         </div>
         <div className="flex items-center gap-4">
-          
-          <button 
+
+          <button
             onClick={handleExportPDF}
             className="text-slate-600 hover:text-indigo-600 font-semibold flex items-center gap-2 transition-colors text-sm px-3 py-1.5 border border-slate-200 rounded-lg bg-white"
           >
@@ -368,15 +472,15 @@ function App() {
             <UserCircle className="w-5 h-5 text-slate-500" />
             <span className="text-sm font-semibold text-slate-700">Officer #4029</span>
           </div>
-          
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileUpload} 
-            accept="image/*,application/pdf" 
-            className="hidden" 
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            accept="image/*,application/pdf"
+            className="hidden"
           />
-          <button 
+          <button
             onClick={() => fileInputRef.current?.click()}
             className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-all shadow-md active:scale-95"
           >
@@ -399,15 +503,18 @@ function App() {
                   <p className="text-sm text-slate-500 font-medium">{t.dbDesc}</p>
                 </div>
               </div>
-              <button 
-                onClick={() => setShowFinalTable(false)}
-                className="text-slate-600 hover:text-indigo-600 font-semibold flex items-center gap-2 transition-colors text-sm no-print"
-              >
-                <ArrowLeft className="w-4 h-4" />
-                {t.backToReview}
-              </button>
+              {/* Back to review button shown if there is an active session ongoing */}
+              {!showFinalTable && (
+                <button
+                  onClick={() => setShowFinalTable(false)}
+                  className="text-slate-600 hover:text-indigo-600 font-semibold flex items-center gap-2 transition-colors text-sm no-print"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  {t.backToReview}
+                </button>
+              )}
             </div>
-            
+
             <div className="flex-1 overflow-y-auto bg-slate-50/30 p-6 print-full">
               <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                 <table className="w-full text-left border-collapse">
@@ -424,12 +531,14 @@ function App() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {records.map(record => (
-                      <tr 
-                        key={record.id} 
+                      <tr
+                        key={record.id}
                         className="hover:bg-slate-50 transition-colors cursor-pointer"
                         onClick={() => handleRecordRowClick(record)}
                       >
-                        <td className="px-6 py-4 text-sm font-semibold text-indigo-600">#{record.id.slice(-6)}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-indigo-600">
+                          {record.id.startsWith('#') ? record.id : `#${record.id.slice(-6)}`}
+                        </td>
                         <td className="px-6 py-4 text-sm text-slate-700 font-medium">{displayLang === 'hi' ? record.khasraNo_hi : record.khasraNo}</td>
                         <td className="px-6 py-4 text-sm text-slate-700 font-medium">{displayLang === 'hi' ? record.khatauniNo_hi : record.khatauniNo}</td>
                         <td className="px-6 py-4 text-sm text-slate-800 font-bold">{displayLang === 'hi' ? record.name_hi : record.name}</td>
@@ -446,7 +555,7 @@ function App() {
         ) : (
           <>
             {/* Left Panel */}
-            <div 
+            <div
               className={`
                 transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] flex shrink-0 no-print
                 ${selectedFieldId ? 'w-1/2 opacity-100 translate-x-0' : 'w-0 opacity-0 -translate-x-8'}
@@ -461,12 +570,19 @@ function App() {
                 <div className="flex-1 relative bg-slate-900 flex items-center justify-center overflow-hidden p-4">
                   {uploadedImagePreview ? (
                     uploadedFileType === 'application/pdf' ? (
-                      <iframe 
-                        key={selectedField?.page_number || 1}
-                        src={`${uploadedImagePreview}#page=${selectedField?.page_number || 1}`} 
-                        className="w-full h-full rounded" 
-                        title="Document Preview" 
-                      />
+                      <div className="relative w-full h-full">
+                        <iframe
+                          key={selectedField?.page_number || 1}
+                          src={`${uploadedImagePreview}#page=${selectedField?.page_number || 1}`}
+                          className="w-full h-full rounded bg-white"
+                          title="Document Preview"
+                        />
+                        <div className="absolute bottom-4 left-0 w-full text-center pointer-events-none">
+                          <span className="bg-slate-900/90 text-white text-xs px-4 py-2 rounded-full font-semibold backdrop-blur-sm border border-slate-700 shadow-lg">
+                            Navigated to Page {selectedField?.page_number || 1}
+                          </span>
+                        </div>
+                      </div>
                     ) : (
                       <div className="relative max-w-full max-h-full flex items-center justify-center">
                         <img src={uploadedImagePreview} alt="Uploaded Document" className="max-w-full max-h-full object-contain bg-white rounded shadow-2xl" />
@@ -479,12 +595,12 @@ function App() {
                         <h3 className="font-serif text-xl font-bold text-slate-800">Govt. Land Record</h3>
                         <p className="font-serif text-sm text-slate-600">Department of Revenue</p>
                       </div>
-                      
+
                       <div className="space-y-4">
                         <div className="h-4 bg-slate-200 rounded w-3/4"></div>
                         <div className="h-4 bg-slate-200 rounded w-full"></div>
                         <div className="h-4 bg-slate-200 rounded w-5/6"></div>
-                        
+
                         <div className="flex justify-between mt-8 border border-slate-300 p-4">
                           <div>
                             <p className="text-xs text-slate-500 mb-1">Land Area / Extent</p>
@@ -502,7 +618,7 @@ function App() {
                             <p className="font-serif font-bold text-slate-800">128/4A</p>
                           </div>
                         </div>
-                        
+
                         <div className="h-4 bg-slate-200 rounded w-4/5 mt-8"></div>
                         <div className="h-4 bg-slate-200 rounded w-2/3"></div>
                       </div>
@@ -518,7 +634,7 @@ function App() {
                 <div>
                   <div className="flex items-center gap-4">
                     {showFinalTable === false && records.length > 0 && (
-                      <button 
+                      <button
                         onClick={() => setShowFinalTable(true)}
                         className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 p-2 rounded-lg transition-colors no-print"
                         title="View Database"
@@ -559,15 +675,15 @@ function App() {
                     {fields.map(field => {
                       const isSelected = selectedFieldId === field.id;
                       const isReviewNeeded = field.status === 'Review Needed';
-                      
+
                       return (
-                        <tr 
+                        <tr
                           key={field.id}
                           onClick={() => handleRowClick(field)}
                           className={`
                             cursor-pointer transition-all duration-300 group
-                            ${isSelected 
-                              ? (isReviewNeeded ? 'bg-red-50/80' : 'bg-indigo-50/80') 
+                            ${isSelected
+                              ? (isReviewNeeded ? 'bg-red-50/80' : 'bg-indigo-50/80')
                               : 'bg-white hover:bg-slate-50'
                             }
                           `}
@@ -581,7 +697,7 @@ function App() {
                               </div>
                             </div>
                           </td>
-                          
+
                           <td className="px-6 py-5">
                             {isSelected ? (
                               <div className="flex items-center gap-3 no-print">
@@ -592,8 +708,8 @@ function App() {
                                   className={`
                                     px-4 py-2 border-2 rounded-lg text-sm font-bold w-48 outline-none
                                     focus:ring-4 transition-all shadow-sm
-                                    ${isReviewNeeded 
-                                      ? 'border-red-400 bg-white text-red-900 focus:ring-red-500/20 focus:border-red-500' 
+                                    ${isReviewNeeded
+                                      ? 'border-red-400 bg-white text-red-900 focus:ring-red-500/20 focus:border-red-500'
                                       : 'border-indigo-400 bg-white text-indigo-900 focus:ring-indigo-500/20 focus:border-indigo-500'
                                     }
                                   `}
@@ -606,7 +722,7 @@ function App() {
                                     }
                                   }}
                                 />
-                                <button 
+                                <button
                                   onClick={(e) => { e.stopPropagation(); handleConfirm(); }}
                                   className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 py-2 rounded-lg flex items-center gap-2 shadow-md"
                                 >
@@ -619,27 +735,27 @@ function App() {
                                 {displayLang === 'hi' ? field.value_hi : field.value}
                               </span>
                             )}
-                            
+
                             {/* Value fallback for printing when in edit mode */}
                             <span className="hidden print:block font-bold text-sm text-slate-700">
-                                {displayLang === 'hi' ? field.value_hi : field.value}
+                              {displayLang === 'hi' ? field.value_hi : field.value}
                             </span>
                           </td>
-                          
+
                           <td className="px-6 py-5">
                             <div className="flex flex-col gap-1.5">
                               <span className={`text-xs font-bold ${isReviewNeeded ? 'text-red-600' : 'text-slate-600'}`}>
                                 {field.confidence}%
                               </span>
                               <div className="w-24 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                                <div 
+                                <div
                                   className={`h-full rounded-full ${isReviewNeeded ? 'bg-red-500' : 'bg-emerald-500'}`}
                                   style={{ width: `${field.confidence}%` }}
                                 />
                               </div>
                             </div>
                           </td>
-                          
+
                           <td className="px-6 py-5">
                             {isReviewNeeded ? (
                               <span className="inline-flex items-center gap-1.5 bg-red-100 text-red-700 text-xs font-bold px-3 py-1.5 rounded-full border border-red-200">
@@ -659,22 +775,22 @@ function App() {
                   </tbody>
                 </table>
               </div>
-              
+
               <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end no-print">
-                 <button 
-                    onClick={handleSubmitApproval}
-                    className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${pendingCount === 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
-                    disabled={pendingCount > 0}
-                 >
-                    {pendingCount === 0 ? (
-                      <>
-                        <CheckCircle2 className="w-4 h-4" />
-                        {t.submitApproval}
-                      </>
-                    ) : (
-                      t.clearToSubmit
-                    )}
-                 </button>
+                <button
+                  onClick={handleSubmitApproval}
+                  className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${pendingCount === 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                  disabled={pendingCount > 0}
+                >
+                  {pendingCount === 0 ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      {editingRecordId ? t.saveRecord : t.submitApproval}
+                    </>
+                  ) : (
+                    t.clearToSubmit
+                  )}
+                </button>
               </div>
             </div>
           </>
